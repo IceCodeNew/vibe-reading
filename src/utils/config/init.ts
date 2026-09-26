@@ -3,9 +3,9 @@ import type { ConfigMeta } from "@/types/config/meta"
 import { dequal } from "dequal"
 import { storage } from "#imports"
 import { configSchema } from "@/types/config/config"
-import { isAPIProviderConfig, isCustomLLMProvider } from "@/types/config/provider"
+import { isAPIProviderConfig, isCustomLLMProvider, isNonCustomLLMProviderConfig } from "@/types/config/provider"
 import { CONFIG_SCHEMA_VERSION, CONFIG_STORAGE_KEY, DEFAULT_CONFIG } from "../constants/config"
-import { CUSTOM_PROVIDER_PRESET_OPTIONS } from "../constants/providers"
+import { CUSTOM_PROVIDER_PRESET_OPTIONS, DEFAULT_LLM_PROVIDER_MODELS, RETIRED_DEFAULT_MODELS } from "../constants/providers"
 import { logger } from "../logger"
 
 /**
@@ -30,11 +30,33 @@ interface Migration {
 }
 
 /**
+ * Replaces the retired default models with the current defaults, for OpenAI
+ * and DeepSeek providers that use the official API. A provider with a base
+ * URL can use a relay that still serves the old model, so it keeps its model.
+ * The migration runs once, so a user can select such a model again after the
+ * upgrade.
+ */
+function replaceRetiredDefaultModels(config: Config): { config: Config, changed: boolean } {
+  let changed = false
+  const providersConfig = config.providersConfig.map((providerConfig) => {
+    if (!isNonCustomLLMProviderConfig(providerConfig)
+      || providerConfig.baseURL?.trim()
+      || !RETIRED_DEFAULT_MODELS[providerConfig.provider].includes(providerConfig.model)) {
+      return providerConfig
+    }
+    changed = true
+    return { ...providerConfig, model: DEFAULT_LLM_PROVIDER_MODELS[providerConfig.provider] }
+  })
+  return { config: changed ? { ...config, providersConfig } : config, changed }
+}
+
+/**
  * Config changes for configs that an older version saved. A migration runs
  * once, when the saved schema version is lower than its version.
  */
 const MIGRATIONS = [
   { version: 2, migrate: saveCustomProviderPresetOptions },
+  { version: 3, migrate: replaceRetiredDefaultModels },
 ] as const satisfies readonly Migration[]
 
 type LastMigration = typeof MIGRATIONS extends readonly [...Migration[], infer Last extends Migration] ? Last : never

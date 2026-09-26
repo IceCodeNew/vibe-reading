@@ -73,7 +73,7 @@ describe("getModelById", () => {
       enabled: true,
       provider: "openai",
       apiKey: "test-key",
-      model: "gpt-5-mini",
+      model: "gpt-6-luna",
     }))
 
     const { getModelById } = await import("../model")
@@ -83,7 +83,7 @@ describe("getModelById", () => {
     expect(createOpenAIMock).toHaveBeenCalledWith(expect.objectContaining({
       apiKey: "test-key",
     }))
-    expect(openAILanguageModelMock).toHaveBeenCalledWith("gpt-5-mini")
+    expect(openAILanguageModelMock).toHaveBeenCalledWith("gpt-6-luna")
   })
 
   it("creates DeepSeek language models", async () => {
@@ -93,7 +93,7 @@ describe("getModelById", () => {
       enabled: true,
       provider: "deepseek",
       apiKey: "test-key",
-      model: "deepseek-v4-flash",
+      model: "deepseek-flash",
     }))
 
     const { getModelById } = await import("../model")
@@ -103,7 +103,7 @@ describe("getModelById", () => {
     expect(createDeepSeekMock).toHaveBeenCalledWith(expect.objectContaining({
       apiKey: "test-key",
     }))
-    expect(deepSeekLanguageModelMock).toHaveBeenCalledWith("deepseek-v4-flash")
+    expect(deepSeekLanguageModelMock).toHaveBeenCalledWith("deepseek-flash")
   })
 
   it("passes custom headers for OpenAI-compatible providers", async () => {
