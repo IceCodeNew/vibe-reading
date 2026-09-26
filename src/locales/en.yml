@@ -156,7 +156,7 @@ options:
       description: Lets the model read a summary of the page before translating each paragraph. Starting takes a few seconds longer and uses more tokens.
     promptLanguage:
       title: Prompt language
-      description: The language of the default and domain prompts. "Auto" uses Chinese prompts when the target language is Chinese. Your own prompts do not change.
+      description: The language of the default and domain prompts. It also sets the target language name and the batch rule in your own prompts, unless a prompt has its own language. "Auto" uses Chinese prompts when the target language is Chinese.
       auto: Auto
       en: English
       zh: Chinese
@@ -184,13 +184,18 @@ options:
         prompt: Prompt
         save: Save
         cancel: Cancel
+        customize: Customize
+        customName: $1 (custom)
+        promptLanguage: Prompt language
+        followPromptLanguage: Follow the setting
       tokens:
         input: Text to translate
         targetLanguage: Target language
-        webTitle: Page title
-        webDescription: Page description from metadata
-        webContent: Page content (first 2000 characters)
-        webSummary: Page summary (needs page context)
+        webTitle: "Page title. Put text between {{#webTitle}} and {{/webTitle}} to remove it when the page has no title."
+        webDescription: "Page description from metadata. Put text between {{#webDescription}} and {{/webDescription}} to remove it when the page has no description."
+        webContent: "Page content (first 2000 characters). Put text between {{#webContent}} and {{/webContent}} to remove it when the page has no content."
+        webSummary: "Page summary (needs page context). Put text between {{#webSummary}} and {{/webSummary}} to remove it when there is no summary."
+        batchRule: Batch rule (only in requests with several paragraphs)
       deleteDialog:
         title: Delete "$1"?
         description: This cannot be undone.

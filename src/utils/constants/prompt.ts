@@ -1,6 +1,6 @@
 import type { PromptLanguage } from "@/types/config/translate"
 
-export const WEB_PAGE_PROMPT_TOKENS = ["targetLanguage", "input", "webTitle", "webDescription", "webContent", "webSummary"] as const
+export const WEB_PAGE_PROMPT_TOKENS = ["targetLanguage", "input", "webTitle", "webDescription", "webContent", "webSummary", "batchRule"] as const
 
 /**
  * Separator used to distinguish multiple text segments in batch translation.
@@ -15,8 +15,21 @@ export const WEB_TITLE = WEB_PAGE_PROMPT_TOKENS[2]
 export const WEB_DESCRIPTION = WEB_PAGE_PROMPT_TOKENS[3]
 export const WEB_CONTENT = WEB_PAGE_PROMPT_TOKENS[4]
 export const WEB_SUMMARY = WEB_PAGE_PROMPT_TOKENS[5]
+export const BATCH_RULE = WEB_PAGE_PROMPT_TOKENS[6]
 
 export const getTokenCellText = (token: string) => `{{${token}}}`
+
+/**
+ * An optional section of a custom prompt. Its text goes away when the page
+ * has no value for the token.
+ */
+export const getOptionalSectionText = (token: string, text: string) => `{{#${token}}}${text}{{/${token}}}`
+
+/** Finds each optional section of the token. The first group is its text. */
+export const getOptionalSectionPattern = (token: string) => new RegExp(`\\{\\{#${token}\\}\\}([\\s\\S]*?)\\{\\{/${token}\\}\\}`, "g")
+
+type OptionalSection = (token: string, text: string) => string
+const keepText: OptionalSection = (_token, text) => text
 
 /** Rules for custom prompts in requests that join several paragraphs with {@link BATCH_SEPARATOR} lines. */
 export const BATCH_TRANSLATE_RULES = `## Multi-paragraph Translation Rules
@@ -91,7 +104,23 @@ export interface BuiltinTranslatePromptInput {
   domainId?: DomainPromptId
   webTitle?: string | null
   webSummary?: string | null
-  isBatch?: boolean
+  /** The line after the instruction: the batch rule in a batch request. */
+  batchRule?: string
+}
+
+/**
+ * The Hy-MT2 "Delimiters" rule. A batch request needs it, because it joins
+ * several paragraphs with {@link BATCH_SEPARATOR} lines.
+ */
+export const BATCH_RULE_TEXT: Record<PromptLanguage, string> = {
+  zh: "你必须在译文中保留等量的分隔符，绝对不可遗漏、转义或翻译该符号，并注意分隔符的位置。",
+  en: "You must retain the exact same number of delimiters in the translation. Strictly do not omit, escape, or translate these symbols, and pay close attention to their placement.",
+}
+
+/** The labels of the Hy-MT2 "Background" template. */
+const BACKGROUND_LABELS: Record<PromptLanguage, { background: string, title: string, summary: string, source: string }> = {
+  zh: { background: "【背景信息】", title: "标题", summary: "摘要", source: "【待翻译文本】" },
+  en: { background: "[Background Information]", title: "Title", summary: "Summary", source: "[Source Text]" },
 }
 
 /**
@@ -103,34 +132,64 @@ export interface BuiltinTranslatePromptInput {
  *
  * Every instruction asks for the translation only: without it, models copied
  * the background labels into the translation in batch tests.
+ *
+ * `optional` wraps the background, the summary line and the source text
+ * label, which depend on the page. By default they stay as they are.
  */
-export function renderBuiltinTranslatePrompt({ promptLanguage, targetLanguage, input, domainId, webTitle, webSummary, isBatch }: BuiltinTranslatePromptInput): string {
+export function renderBuiltinTranslatePrompt(
+  { promptLanguage, targetLanguage, input, domainId, webTitle, webSummary, batchRule }: BuiltinTranslatePromptInput,
+  optional: OptionalSection = keepText,
+): string {
   const zh = promptLanguage === "zh"
+  const labels = BACKGROUND_LABELS[promptLanguage]
   const style = domainId && DOMAIN_STYLES[domainId][promptLanguage]
-  const background = [
-    webTitle?.trim() && `${zh ? "标题" : "Title"}: ${webTitle.trim()}`,
-    webSummary?.trim() && `${zh ? "摘要" : "Summary"}: ${webSummary.trim()}`,
-  ].filter(Boolean).join("\n")
-  // The official "Default" template ends with a colon before the text.
-  const end = !background && !style && !isBatch ? (zh ? "：" : ":") : (zh ? "。" : ".")
+  const titleLine = webTitle?.trim() ? `${labels.title}: ${webTitle.trim()}` : ""
+  const summaryLine = webSummary?.trim() ? optional(WEB_SUMMARY, `${titleLine && "\n"}${labels.summary}: ${webSummary.trim()}`) : ""
+  const background = titleLine + summaryLine
+  // The official "Default" template ends with a colon before the text. In a
+  // batch request the batch rule comes next, so the instruction ends with a period.
+  const end = !background && !style && !batchRule ? (zh ? "：" : ":") : (zh ? "。" : ".")
 
   const instruction = zh
     ? [
         `${background ? "请结合背景信息将以下文本翻译为" : "将以下文本翻译为"}${targetLanguage}，注意只需要输出翻译后的结果，不要额外解释${end}`,
         style && `注意翻译的风格要严格符合【${style}】`,
-        isBatch && "你必须在译文中保留等量的分隔符，绝对不可遗漏、转义或翻译该符号，并注意分隔符的位置。",
+        batchRule,
       ]
     : [
         `${background ? `Please translate the following text into ${targetLanguage}, taking the provided background information into consideration.` : `Translate the following text into ${targetLanguage}.`} Note that you should only output the translated result without any additional explanation${end}`,
         style && `Note that the translation style must strictly conform to [${style}].`,
-        isBatch && "You must retain the exact same number of delimiters in the translation. Strictly do not omit, escape, or translate these symbols, and pay close attention to their placement.",
+        batchRule,
       ]
 
-  return [
-    background && `${zh ? "【背景信息】" : "[Background Information]"}\n${background}`,
-    instruction.filter(Boolean).join("\n"),
-    background ? `${zh ? "【待翻译文本】" : "[Source Text]"}\n${input}` : input,
-  ].filter(Boolean).join("\n\n")
+  const instructionText = instruction.filter(Boolean).join("\n")
+  if (!background)
+    return `${instructionText}\n\n${input}`
+  return `${optional(WEB_TITLE, `${labels.background}\n${background}\n\n`)}${instructionText}\n\n${optional(WEB_TITLE, `${labels.source}\n`)}${input}`
+}
+
+/**
+ * The built-in prompt with token cells in place of the values, as shown in
+ * the prompt list. The summary line is there only when page context can
+ * supply a summary. It is also the start content when the reader makes a
+ * custom prompt from a built-in one.
+ *
+ * The background and the source text label are optional sections of
+ * {{webTitle}}, and the summary line is an optional section of
+ * {{webSummary}}. Thus a page without a summary gives the same request as
+ * the built-in prompt. A page without a title loses the background, but the
+ * instruction keeps the background wording, because its text is fixed.
+ */
+export function renderBuiltinPromptTemplate({ promptLanguage, domainId, withSummary }: { promptLanguage: PromptLanguage, domainId?: DomainPromptId, withSummary: boolean }): string {
+  return renderBuiltinTranslatePrompt({
+    promptLanguage,
+    targetLanguage: getTokenCellText(TARGET_LANGUAGE),
+    input: getTokenCellText(INPUT),
+    domainId,
+    webTitle: getTokenCellText(WEB_TITLE),
+    webSummary: withSummary ? getTokenCellText(WEB_SUMMARY) : null,
+    batchRule: getTokenCellText(BATCH_RULE),
+  }, getOptionalSectionText)
 }
 
 /**

@@ -1,5 +1,8 @@
 import type { TranslatePromptObj } from "@/types/config/translate"
+import { z } from "zod"
+import { translatePromptObjSchema } from "@/types/config/translate"
 import { APP_NAME } from "@/utils/constants/app"
+import { inferPromptLanguage } from "@/utils/prompts/prompt-language"
 
 export type PromptConfig = Omit<TranslatePromptObj, "id">
 export type PromptConfigList = PromptConfig[]
@@ -7,12 +10,27 @@ export type PromptConfigList = PromptConfig[]
 const PROMPTS_FILE = `${APP_NAME}_prompts`
 const OBJECT_URL_LIFETIME_MS = 40_000
 
-export function checkPromptConfig(list: PromptConfig[]) {
-  if (!Array.isArray(list)) {
-    return false
-  }
+// The prompts of an exported file. Files from earlier versions can have no
+// system prompt and no prompt language.
+const promptFileSchema = z.array(translatePromptObjSchema.omit({ id: true }).extend({
+  name: z.string().min(1),
+  prompt: z.string().min(1),
+  systemPrompt: z.string().optional(),
+}))
 
-  return list.every(item => item.name && item.prompt)
+/**
+ * The prompts of a file, ready to add. A prompt without a prompt language
+ * gets the language of its text, like a saved prompt after the upgrade.
+ */
+function readPromptFile(text: string): PromptConfigList {
+  const result = promptFileSchema.safeParse(JSON.parse(text))
+  if (!result.success)
+    throw new Error("Prompt config is invalid")
+  return result.data.map(({ systemPrompt = "", ...prompt }) => ({
+    ...prompt,
+    systemPrompt,
+    promptLanguage: prompt.promptLanguage ?? inferPromptLanguage(`${systemPrompt}\n${prompt.prompt}`),
+  }))
 }
 
 export function downloadJSONFile(data: object) {
@@ -39,9 +57,7 @@ export function analysisJSONFile(file: File): Promise<PromptConfigList> {
       try {
         const fileResult = e.target?.result ?? "[]"
         if (typeof fileResult === "string") {
-          const list = JSON.parse(fileResult)
-          const checked = checkPromptConfig(list)
-          checked ? resolve(list) : reject(new Error("Prompt config is invalid"))
+          resolve(readPromptFile(fileResult))
         }
         else {
           reject(new Error("Prompt config is invalid"))

@@ -7,6 +7,7 @@ import { isAPIProviderConfig, isCustomLLMProvider, isNonCustomLLMProviderConfig 
 import { CONFIG_SCHEMA_VERSION, CONFIG_STORAGE_KEY, DEFAULT_CONFIG } from "../constants/config"
 import { CUSTOM_PROVIDER_PRESET_OPTIONS, DEFAULT_LLM_PROVIDER_MODELS, RETIRED_DEFAULT_MODELS } from "../constants/providers"
 import { logger } from "../logger"
+import { inferPromptLanguage } from "../prompts/prompt-language"
 
 /**
  * Version 1 sent the preset options for a custom provider without saved
@@ -51,12 +52,36 @@ function replaceRetiredDefaultModels(config: Config): { config: Config, changed:
 }
 
 /**
+ * Earlier versions named the target language of a custom prompt in
+ * English. Now a custom prompt without a prompt language follows the prompt
+ * language setting. Save the language of each such prompt, as its text shows
+ * it, so that a prompt in Chinese gets Chinese names and other prompts keep
+ * English names. The prompt editor shows the language, and the user can
+ * change it.
+ */
+function saveCustomPromptLanguages(config: Config): { config: Config, changed: boolean } {
+  const { patterns } = config.translate.customPromptsConfig
+  if (patterns.every(pattern => pattern.promptLanguage !== undefined))
+    return { config, changed: false }
+  const withLanguages = patterns.map((pattern) => {
+    if (pattern.promptLanguage !== undefined)
+      return pattern
+    return { ...pattern, promptLanguage: inferPromptLanguage(`${pattern.systemPrompt}\n${pattern.prompt}`) }
+  })
+  return {
+    config: { ...config, translate: { ...config.translate, customPromptsConfig: { ...config.translate.customPromptsConfig, patterns: withLanguages } } },
+    changed: true,
+  }
+}
+
+/**
  * Config changes for configs that an older version saved. A migration runs
  * once, when the saved schema version is lower than its version.
  */
 const MIGRATIONS = [
   { version: 2, migrate: saveCustomProviderPresetOptions },
   { version: 3, migrate: replaceRetiredDefaultModels },
+  { version: 4, migrate: saveCustomPromptLanguages },
 ] as const satisfies readonly Migration[]
 
 type LastMigration = typeof MIGRATIONS extends readonly [...Migration[], infer Last extends Migration] ? Last : never

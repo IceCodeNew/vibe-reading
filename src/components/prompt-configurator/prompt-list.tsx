@@ -4,7 +4,7 @@ import { useAtom, useAtomValue } from "jotai"
 import { useId } from "react"
 import { i18n } from "#imports"
 import { configFieldsAtomMap } from "@/utils/atoms/config"
-import { DEFAULT_TRANSLATE_PROMPT_ID, DOMAIN_PROMPT_IDS, getTokenCellText, INPUT, isBuiltinPromptId, isDomainPromptId, renderBuiltinTranslatePrompt, TARGET_LANGUAGE, WEB_SUMMARY, WEB_TITLE } from "@/utils/constants/prompt"
+import { DEFAULT_TRANSLATE_PROMPT_ID, DOMAIN_PROMPT_IDS, isBuiltinPromptId, isDomainPromptId, renderBuiltinPromptTemplate } from "@/utils/constants/prompt"
 import { resolvePromptLanguage } from "@/utils/prompts/prompt-language"
 import { cn } from "@/utils/styles/utils"
 import { ConfigurePrompt } from "./configure-prompt"
@@ -29,22 +29,22 @@ export function PromptList() {
   const [config, setConfig] = useAtom(promptAtoms.config)
   const radioGroupId = useId()
 
-  const { promptLanguage: promptLanguageSetting } = useAtomValue(configFieldsAtomMap.translate)
+  const { promptLanguage: promptLanguageSetting, enableAIContentAware } = useAtomValue(configFieldsAtomMap.translate)
   const { targetCode } = useAtomValue(configFieldsAtomMap.language)
   const promptLanguage = resolvePromptLanguage(promptLanguageSetting, targetCode)
 
-  // Built-in prompts are shown as the template the model receives for one paragraph.
+  // Built-in prompts are shown as the template the model receives for one paragraph
+  // with the current settings.
   const builtinPrompt = (id: string, name: string): TranslatePromptObj => ({
     id,
     name,
     systemPrompt: "",
-    prompt: renderBuiltinTranslatePrompt({
+    // A copy keeps the language of this text.
+    promptLanguage,
+    prompt: renderBuiltinPromptTemplate({
       promptLanguage,
-      targetLanguage: getTokenCellText(TARGET_LANGUAGE),
-      input: getTokenCellText(INPUT),
       domainId: isDomainPromptId(id) ? id : undefined,
-      webTitle: getTokenCellText(WEB_TITLE),
-      webSummary: getTokenCellText(WEB_SUMMARY),
+      withSummary: enableAIContentAware,
     }),
   })
   const prompts = [
