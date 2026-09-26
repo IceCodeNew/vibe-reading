@@ -25,14 +25,16 @@ export interface ReceivedOptions {
 /**
  * Starts a local gateway with the OpenAI Chat Completions wire contract
  * (https://platform.openai.com/docs/api-reference/chat/create), which custom
- * providers use. It answers each request and records the reasoning options
- * of each request. A test changes `behavior` to make the gateway strict, down or slow.
+ * providers use. It answers each request and records the model and the
+ * reasoning options of each request. A test changes `behavior` to make the gateway strict, down or slow.
  */
 export async function startFakeChatGateway() {
   const received: ReceivedOptions[] = []
-  const gateway: { behavior: ChatGatewayBehavior, received: ReceivedOptions[], baseURL: string, close: () => Promise<void> } = {
+  const models: string[] = []
+  const gateway: { behavior: ChatGatewayBehavior, received: ReceivedOptions[], models: string[], baseURL: string, close: () => Promise<void> } = {
     behavior: {},
     received,
+    models,
     baseURL: "",
     close: async () => {},
   }
@@ -40,8 +42,9 @@ export async function startFakeChatGateway() {
     let body = ""
     for await (const chunk of request)
       body += chunk
-    const { reasoning_effort, thinking }: ReceivedOptions = JSON.parse(body)
+    const { model, reasoning_effort, thinking }: ReceivedOptions & { model: string } = JSON.parse(body)
     received.push({ reasoning_effort, thinking })
+    models.push(model)
     const { rejectedEfforts = [], down = false, holdThinking, answer = "Hola" } = gateway.behavior
     response.setHeader("Content-Type", "application/json")
     if (down) {
