@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import { Buffer } from "node:buffer"
 import { createServer } from "node:http"
 import { after, before, it } from "node:test"
-import { launchBrowser, waitForText } from "./browser.mjs"
+import { launchBrowser, listenOnLocalPort, waitForText } from "./browser.mjs"
 
 const text = "The supplier shall indemnify the customer."
 const translated = "Le fournisseur indemnisera le client."
@@ -48,7 +48,7 @@ const server = createServer(async (request, response) => {
 })
 
 before(async () => {
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve))
+  await listenOnLocalPort(server)
   pageURL = `http://127.0.0.1:${server.address().port}`
   let extensionId
   ;({ context, page: article, extensionId } = await launchBrowser())

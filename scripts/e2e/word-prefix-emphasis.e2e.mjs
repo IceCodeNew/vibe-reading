@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import { Buffer } from "node:buffer"
 import { createServer } from "node:http"
 import { after, before, it } from "node:test"
-import { capture, launchBrowser, waitForText } from "./browser.mjs"
+import { capture, launchBrowser, listenOnLocalPort, waitForText } from "./browser.mjs"
 
 const SWITCH = "Word-prefix emphasis"
 const text = "Reading unfamiliar words takes practice. Keep the whole sentence in view."
@@ -97,7 +97,7 @@ async function setTranslationMode(mode) {
 }
 
 before(async () => {
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve))
+  await listenOnLocalPort(server)
   pageURL = `http://127.0.0.1:${server.address().port}`
   let extensionId
   ;({ context, page: article, extensionId } = await launchBrowser())

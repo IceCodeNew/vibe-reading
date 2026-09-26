@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import { Buffer } from "node:buffer"
 import { createServer } from "node:http"
 import { after, before, beforeEach, it } from "node:test"
-import { capture, launchBrowser, waitForText } from "./browser.mjs"
+import { capture, launchBrowser, listenOnLocalPort, waitForText } from "./browser.mjs"
 
 const title = "Master services agreement"
 const text = "The supplier shall indemnify the customer against all third-party claims."
@@ -74,7 +74,7 @@ async function closeDialog() {
 }
 
 before(async () => {
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve))
+  await listenOnLocalPort(server)
   pageURL = `http://127.0.0.1:${server.address().port}`
   let extensionId
   ;({ context, page: article, extensionId } = await launchBrowser())
