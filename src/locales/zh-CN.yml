@@ -91,6 +91,7 @@ options:
       testConnection:
         button: 测试连接
         testing: 测试中…
+        thinkingFallback: '该服务不接受 "reasoningEffort": "none"（$1）。改用 "thinking": {"type": "disabled"} 后连接成功，Provider 选项已改为使用它。'
       models:
         fetchModels: 获取可用模型
         fetchError: 获取模型失败
@@ -235,6 +236,7 @@ translation:
   failed: 翻译失败
   retry: 重试
   unknownError: 出了点问题
+  thinkingFallback: '该服务不接受 "reasoningEffort": "none"（$1）。Provider 选项已改为使用 "thinking": {"type": "disabled"}，翻译会发送它。'
 shortcutKeySelector:
   placeholder: 按下快捷键
 languages:

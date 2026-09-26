@@ -2,6 +2,12 @@ import type { AllProviderTypes, APIProviderTypes, LLMProviderConfig, LLMProvider
 import { API_PROVIDER_TYPES, TRANSLATE_PROVIDER_TYPES } from "@/types/config/provider"
 import { pick } from "@/types/utils"
 
+/**
+ * The provider options of a new custom provider. They show in the provider
+ * options field, where the user can change or remove them.
+ */
+export const CUSTOM_PROVIDER_PRESET_OPTIONS = { reasoningEffort: "none" } as const
+
 export const DEFAULT_LLM_PROVIDER_MODELS = {
   "openai-compatible": "",
   "openai": "gpt-6-luna",
@@ -41,6 +47,7 @@ export const DEFAULT_PROVIDER_CONFIG = {
     provider: "openai-compatible",
     baseURL: "https://api.example.com/v1",
     model: DEFAULT_LLM_PROVIDER_MODELS["openai-compatible"],
+    providerOptions: { ...CUSTOM_PROVIDER_PRESET_OPTIONS },
   },
   "openai": {
     id: "openai-default",

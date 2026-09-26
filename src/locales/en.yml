@@ -91,6 +91,7 @@ options:
       testConnection:
         button: Test connection
         testing: Testing…
+        thinkingFallback: 'The service does not accept "reasoningEffort": "none" ($1). The connection works with "thinking": {"type": "disabled"} instead, so the provider options now use it.'
       models:
         fetchModels: Fetch available models
         fetchError: Failed to fetch models
@@ -235,6 +236,7 @@ translation:
   failed: Translation failed
   retry: Retry
   unknownError: Something went wrong
+  thinkingFallback: 'The service does not accept "reasoningEffort": "none" ($1). The provider options now use "thinking": {"type": "disabled"}, and translations send it.'
 shortcutKeySelector:
   placeholder: Press a shortcut
 languages:
