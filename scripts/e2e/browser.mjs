@@ -43,3 +43,17 @@ export async function capture(page, name) {
     await page.screenshot({ path: resolve(process.env.E2E_SCREENSHOTS, `${name}.png`) })
   }
 }
+
+// Chromium refuses these ports with ERR_UNSAFE_PORT (net/base/port_util.cc).
+// Only ports above 1023 are here, because the system never assigns lower ones.
+const UNSAFE_PORTS = new Set([1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080])
+
+/** Listens on a free local port that the browser can reach, and returns the port. */
+export async function listenOnLocalPort(server) {
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve))
+  const { port } = server.address()
+  if (!UNSAFE_PORTS.has(port))
+    return port
+  await new Promise(resolve => server.close(resolve))
+  return listenOnLocalPort(server)
+}

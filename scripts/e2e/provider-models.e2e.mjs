@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import { Buffer } from "node:buffer"
 import { createServer } from "node:http"
 import { after, afterEach, before, beforeEach, it } from "node:test"
-import { capture, clickButton, launchBrowser, waitForText } from "./browser.mjs"
+import { capture, clickButton, launchBrowser, listenOnLocalPort, waitForText } from "./browser.mjs"
 
 const MODEL_INPUT = "input[aria-label='Model']"
 let context
@@ -182,7 +182,7 @@ async function reloadSettings() {
 }
 
 before(async () => {
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve))
+  await listenOnLocalPort(server)
   baseURL = `http://127.0.0.1:${server.address().port}/v1`
 })
 
