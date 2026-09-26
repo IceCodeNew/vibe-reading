@@ -2,7 +2,6 @@ import type { LangCodeISO6393 } from "@/definitions"
 import type { Config } from "@/types/config/config"
 import type { TranslatePromptObj } from "@/types/config/translate"
 import type { WebPagePromptContext } from "@/types/content"
-import { LANG_CODE_TO_EN_NAME } from "@/definitions"
 import { getLocalConfig } from "@/utils/config/storage"
 import { DEFAULT_CONFIG } from "../constants/config"
 import {
@@ -40,12 +39,12 @@ export function getTranslatePromptFromConfig(
   options?: TranslatePromptOptions<WebPagePromptContext>,
 ): TranslatePromptResult {
   const { patterns, promptId } = translateConfig.customPromptsConfig
+  const promptLanguage = resolvePromptLanguage(translateConfig.promptLanguage, targetCode)
   const customPrompt = patterns.find(pattern => pattern.id === promptId)
   if (customPrompt) {
-    return renderCustomPrompt(customPrompt, LANG_CODE_TO_EN_NAME[targetCode], input, options)
+    return renderCustomPrompt(customPrompt, getTargetLanguageName(targetCode, promptLanguage), input, options)
   }
 
-  const promptLanguage = resolvePromptLanguage(translateConfig.promptLanguage, targetCode)
   return {
     systemPrompt: "",
     prompt: renderBuiltinTranslatePrompt({
@@ -60,7 +59,7 @@ export function getTranslatePromptFromConfig(
   }
 }
 
-/** Custom prompts always use English language names and English batch rules. */
+/** Custom prompts get the English batch rules in the system prompt. */
 function renderCustomPrompt(
   customPrompt: TranslatePromptObj,
   targetLanguage: string,

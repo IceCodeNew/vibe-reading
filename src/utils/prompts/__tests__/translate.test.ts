@@ -140,19 +140,24 @@ describe("domain translation prompt", () => {
 })
 
 describe("custom translation prompt", () => {
-  it("user keeps their own prompt: Given Chinese prompts are pinned, When they translate into Chinese, Then their prompt uses the English language name as before", () => {
-    const result = translatePrompt({ promptId: CUSTOM_PROMPT.id, promptLanguage: "zh", targetCode: "cmn", context: { webTitle: "Docs" } })
+  it.each([
+    ["zh", "spa", "西班牙语"],
+    ["en", "cmn", "Simplified Mandarin Chinese"],
+    ["auto", "cmn", "简体中文"],
+    ["auto", "spa", "Spanish"],
+  ] as const)("user uses their own prompt: Given the prompt language %s, When they translate into %s, Then {{targetLanguage}} is %s like in the built-in prompts", (promptLanguage, targetCode, name) => {
+    const result = translatePrompt({ promptId: CUSTOM_PROMPT.id, promptLanguage, targetCode, context: { webTitle: "Docs" } })
 
     expect(result).toEqual({
-      systemPrompt: "You translate into Simplified Mandarin Chinese.",
+      systemPrompt: `You translate into ${name}.`,
       prompt: "Title: Docs\nHello world",
     })
   })
 
-  it("user keeps their own prompt for several paragraphs: Given a batch request, When the target is Chinese, Then the English batch rules follow their system prompt as before", () => {
+  it("user uses their own prompt for several paragraphs: Given a batch request, When the target is Chinese, Then the English batch rules follow their system prompt", () => {
     const result = translatePrompt({ promptId: CUSTOM_PROMPT.id, targetCode: "cmn", isBatch: true })
 
-    expect(result.systemPrompt).toBe(`You translate into Simplified Mandarin Chinese.\n\n${BATCH_TRANSLATE_RULES}`)
+    expect(result.systemPrompt).toBe(`You translate into 简体中文.\n\n${BATCH_TRANSLATE_RULES}`)
   })
 
   it("user deleted the selected prompt: Given the prompt id is not in the list, When they translate, Then the default prompt is used", () => {
