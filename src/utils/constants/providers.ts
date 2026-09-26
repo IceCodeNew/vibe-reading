@@ -1,18 +1,27 @@
-import type { AllProviderTypes, APIProviderTypes, LLMProviderConfig, LLMProviderTypes, ProviderConfig, ProvidersConfig } from "@/types/config/provider"
+import type { AllProviderTypes, APIProviderTypes, LLMProviderConfig, LLMProviderTypes, NonCustomLLMProviderTypes, ProviderConfig, ProvidersConfig } from "@/types/config/provider"
 import { API_PROVIDER_TYPES, TRANSLATE_PROVIDER_TYPES } from "@/types/config/provider"
 import { pick } from "@/types/utils"
-
-/**
- * The provider options of a new custom provider. They show in the provider
- * options field, where the user can change or remove them.
- */
-export const CUSTOM_PROVIDER_PRESET_OPTIONS = { reasoningEffort: "none" } as const
 
 export const DEFAULT_LLM_PROVIDER_MODELS = {
   "openai-compatible": "",
   "openai": "gpt-6-luna",
   "deepseek": "deepseek-flash",
 } as const satisfies Record<LLMProviderTypes, LLMProviderConfig["model"]>
+
+/**
+ * Models that earlier versions set as the default and that OpenAI or DeepSeek
+ * retired. The config migration in init.ts replaces them.
+ */
+export const RETIRED_DEFAULT_MODELS: Record<NonCustomLLMProviderTypes, readonly string[]> = {
+  openai: ["gpt-5-mini"],
+  deepseek: ["deepseek-chat", "deepseek-v4-flash"],
+}
+
+/**
+ * The provider options of a new custom provider. They show in the provider
+ * options field, where the user can change or remove them.
+ */
+export const CUSTOM_PROVIDER_PRESET_OPTIONS = { reasoningEffort: "none" } as const
 
 export interface ProviderItem {
   name: string
