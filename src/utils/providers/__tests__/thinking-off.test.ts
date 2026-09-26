@@ -54,6 +54,7 @@ function providerFor(provider: "deepseek" | "openai-compatible"): LLMProviderCon
     apiKey: "test-key",
     baseURL,
     model: provider === "deepseek" ? "deepseek-flash" : "any-model",
+    providerOptions: undefined,
   }
 }
 

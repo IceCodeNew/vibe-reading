@@ -1,5 +1,6 @@
 /* global chrome -- page.evaluate() runs these callbacks in the extension page. */
 import assert from "node:assert/strict"
+import { Buffer } from "node:buffer"
 import { createServer } from "node:http"
 import { after, afterEach, before, beforeEach, it } from "node:test"
 import { capture, clickButton, launchBrowser, waitForText } from "./browser.mjs"
@@ -14,16 +15,33 @@ let expectedAuthorization
 let expectedTenant
 let responseMode
 let pendingRequest
+/** Rejects reasoning_effort "none" like gateways in front of DeepSeek V4.1 Flash. */
+let rejectReasoningEffortNone
+/** When set, the request that turns off thinking waits for this promise. */
+let holdThinkingRequest
+let thinkingRequestSeen
 
 // Wire contract checked against the provider documentation, not application code:
 // https://developers.openai.com/api/reference/resources/models/methods/list
 // https://api-docs.deepseek.com/api/list-models
 // https://lmstudio.ai/docs/developer/openai-compat/models
-const server = createServer((request, response) => {
+const server = createServer(async (request, response) => {
   response.setHeader("Content-Type", "application/json")
   // OpenAI Chat Completions wire contract, also used by DeepSeek and compatible providers:
   // https://platform.openai.com/docs/api-reference/chat/create
   if (request.method === "POST" && request.url === "/v1/chat/completions" && request.headers.authorization === expectedAuthorization) {
+    const chunks = []
+    for await (const chunk of request)
+      chunks.push(chunk)
+    const body = JSON.parse(Buffer.concat(chunks).toString())
+    if (rejectReasoningEffortNone && body.reasoning_effort === "none") {
+      response.writeHead(400).end(JSON.stringify({ error: { message: "Invalid option: expected one of \"low\"|\"medium\"|\"high\"|\"xhigh\"|\"max\"" } }))
+      return
+    }
+    if (body.thinking?.type === "disabled" && holdThinkingRequest) {
+      thinkingRequestSeen?.()
+      await holdThinkingRequest
+    }
     response.end(JSON.stringify({
       id: "chatcmpl-test",
       object: "chat.completion",
@@ -104,6 +122,60 @@ async function waitForSavedProvider(fields) {
   }), fields)
 }
 
+/**
+ * Chooses "OpenAI-compatible endpoint" in the open add menu and waits for the
+ * form of the new provider. The page shows that form only after it saves the
+ * provider, so until then the form of the previous provider stays open.
+ */
+async function chooseCustomEndpoint() {
+  await page.getByRole("button", { name: "OpenAI-compatible endpoint", exact: true }).click()
+  await page.waitForFunction(() => /^Custom Provider \d+$/.test(document.querySelector("#name")?.value ?? ""))
+}
+
+/** Adds a custom provider that uses the local server and opens its provider options. */
+async function addCustomProviderBehindGateway() {
+  await page.getByRole("button", { name: /^Add a service/ }).click()
+  await chooseCustomEndpoint()
+  await fill("#apiKey", "test-key")
+  await fill("#baseURL", baseURL)
+  await fill(MODEL_INPUT, "any-model")
+  await waitForSavedProvider({ model: "any-model", baseURL })
+  await page.getByRole("button", { name: "Advanced: temperature, headers, provider options", exact: true }).click()
+}
+
+/** Waits until the last provider has these provider options in storage. */
+async function waitForSavedProviderOptions(options) {
+  await page.evaluate(options => new Promise((resolve) => {
+    // Storage can keep the keys in another order.
+    const sorted = value => value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map(key => [key, sorted(value[key])])) : value
+    const check = async () => {
+      const { config } = await chrome.storage.local.get("config")
+      if (JSON.stringify(sorted(config.providersConfig.at(-1).providerOptions)) === JSON.stringify(sorted(options))) {
+        chrome.storage.onChanged.removeListener(check)
+        resolve()
+      }
+    }
+    chrome.storage.onChanged.addListener(check)
+    check()
+  }), options)
+}
+
+/** Types the options into the provider options field and waits until they are saved. */
+async function setProviderOptions(options) {
+  await page.locator("[aria-label='provider-options-editor'] .cm-content").click()
+  await page.keyboard.press("ControlOrMeta+a")
+  await page.keyboard.insertText(JSON.stringify(options))
+  await waitForSavedProviderOptions(options)
+}
+
+/**
+ * The result icon beside "Test connection". Other icons, such as the check of
+ * the selected model in the closing model list, are not part of the result.
+ */
+function connectionResult(icon = ".tabler-icon-check, .tabler-icon-x") {
+  return page.getByRole("button", { name: "Test connection", exact: true }).locator("..").locator(icon)
+}
+
 async function reloadSettings() {
   await page.reload()
   await waitForText(page, "DeepSeek")
@@ -123,6 +195,9 @@ beforeEach(async () => {
   expectedTenant = undefined
   responseMode = "models"
   pendingRequest = undefined
+  rejectReasoningEffortNone = false
+  holdThinkingRequest = undefined
+  thinkingRequestSeen = undefined
   await page.goto(optionsURL)
   await waitForText(page, "DeepSeek")
 })
@@ -379,10 +454,80 @@ for (const providerName of ["DeepSeek", "Custom Provider"]) {
     await clickButton(page, "Test connection")
 
     // Then
-    await page.locator(".tabler-icon-check, .tabler-icon-x").waitFor()
-    assert.ok(await page.locator(".tabler-icon-check").count() > 0)
+    await connectionResult().waitFor()
+    assert.equal(await connectionResult(".tabler-icon-check").count(), 1)
   })
 }
+
+it("user adds a custom provider: Given the add menu, When the user adds an OpenAI-compatible endpoint, Then its provider options show reasoningEffort none, and the user can change them", async () => {
+  // Given
+  await page.getByRole("button", { name: /^Add a service/ }).click()
+
+  // When
+  await chooseCustomEndpoint()
+
+  // Then
+  await page.getByRole("button", { name: "Advanced: temperature, headers, provider options", exact: true }).click()
+  const editor = page.locator("[aria-label='provider-options-editor'] .cm-content")
+  await editor.waitFor()
+  assert.equal(JSON.parse(await editor.textContent()).reasoningEffort, "none")
+  await fill(MODEL_INPUT, "any-model")
+  await editor.click()
+  await page.keyboard.press("ControlOrMeta+a")
+  await page.keyboard.insertText(`{ "reasoningEffort": "low" }`)
+  await waitForSavedProviderOptions({ reasoningEffort: "low" })
+  await reloadSettings()
+  const added = await page.evaluate(async () => (await chrome.storage.local.get("config")).config.providersConfig.at(-1))
+  assert.deepEqual(added.providerOptions, { reasoningEffort: "low" })
+})
+
+it("user tests a custom provider behind a strict gateway: Given the preset reasoningEffort none and another option, When the gateway rejects none, Then the test tries the thinking switch, keeps the other option and tells why", async () => {
+  // Given
+  rejectReasoningEffortNone = true
+  await addCustomProviderBehindGateway()
+  await setProviderOptions({ reasoningEffort: "none", topK: 20 })
+
+  // When
+  await clickButton(page, "Test connection")
+
+  // Then
+  await waitForText(page, "The service does not accept")
+  await connectionResult(".tabler-icon-check").waitFor()
+  await waitForSavedProviderOptions({ topK: 20, thinking: { type: "disabled" } })
+
+  // When the user then changes the options, Then the old result goes away
+  await setProviderOptions({ topK: 30, thinking: { type: "disabled" } })
+  await connectionResult(".tabler-icon-check").waitFor({ state: "detached" })
+  await reloadSettings()
+  const added = await page.evaluate(async () => (await chrome.storage.local.get("config")).config.providersConfig.at(-1))
+  assert.deepEqual(added.providerOptions, { topK: 30, thinking: { type: "disabled" } })
+})
+
+it("user edits the options during a test: Given the gateway rejects none, When the user changes the options before the second request ends, Then the test keeps the user's options and shows no fallback message", async () => {
+  // Given
+  rejectReasoningEffortNone = true
+  let release
+  holdThinkingRequest = new Promise((resolve) => {
+    release = resolve
+  })
+  const seen = new Promise((resolve) => {
+    thinkingRequestSeen = resolve
+  })
+  await addCustomProviderBehindGateway()
+  await setProviderOptions({ reasoningEffort: "none" })
+
+  // When
+  await clickButton(page, "Test connection")
+  await seen
+  await setProviderOptions({ reasoningEffort: "low" })
+  release()
+
+  // Then
+  await page.getByRole("button", { name: "Test connection", exact: true }).and(page.locator(":enabled")).waitFor()
+  assert.equal(await page.getByText("The service does not accept").count(), 0)
+  const added = await page.evaluate(async () => (await chrome.storage.local.get("config")).config.providersConfig.at(-1))
+  assert.deepEqual(added.providerOptions, { reasoningEffort: "low" })
+})
 
 it("user clears the model: Given a provider with a model, When the model field is cleared, Then an error shows and the saved model stays", async () => {
   // Given
@@ -418,6 +563,6 @@ it("user tests a connection with a config from an older version: Given the store
   await clickButton(page, "Test connection")
 
   // Then
-  await page.locator(".tabler-icon-check, .tabler-icon-x").waitFor()
-  assert.ok(await page.locator(".tabler-icon-check").count() > 0)
+  await connectionResult().waitFor()
+  assert.equal(await connectionResult(".tabler-icon-check").count(), 1)
 })

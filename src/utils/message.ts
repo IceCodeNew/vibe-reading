@@ -32,6 +32,8 @@ interface ProtocolMap {
   translationProgressChanged: (data: { tabId: number, progress: TranslationProgress }) => void
   // request
   enqueueTranslateRequest: (data: { text: string, langConfig: Config["language"], providerConfig: ProviderConfig, scheduleAt: number, hash: string, webTitle?: string | null, webDescription?: string | null, webContent?: string | null, webSummary?: string | null }) => Promise<string>
+  // Background to the tab: a custom provider now uses the thinking fallback options.
+  notifyThinkingFallback: (data: { reason: string }) => void
   getOrGenerateWebPageSummary: (data: { webTitle: string, webContent: string, providerConfig: ProviderConfig }) => Promise<string | null>
   backgroundGenerateText: (data: BackgroundGenerateTextPayload) => Promise<BackgroundGenerateTextResponse>
   setTranslateRequestQueueConfig: (data: Partial<RequestQueueConfig>) => void

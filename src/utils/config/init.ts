@@ -3,9 +3,45 @@ import type { ConfigMeta } from "@/types/config/meta"
 import { dequal } from "dequal"
 import { storage } from "#imports"
 import { configSchema } from "@/types/config/config"
-import { isAPIProviderConfig } from "@/types/config/provider"
+import { isAPIProviderConfig, isCustomLLMProvider } from "@/types/config/provider"
 import { CONFIG_SCHEMA_VERSION, CONFIG_STORAGE_KEY, DEFAULT_CONFIG } from "../constants/config"
+import { CUSTOM_PROVIDER_PRESET_OPTIONS } from "../constants/providers"
 import { logger } from "../logger"
+
+/**
+ * Version 1 sent the preset options for a custom provider without saved
+ * provider options. Save them, so that the provider options field shows them
+ * and the user can change or remove them.
+ */
+function saveCustomProviderPresetOptions(config: Config): { config: Config, changed: boolean } {
+  let changed = false
+  const providersConfig = config.providersConfig.map((providerConfig) => {
+    if (!isCustomLLMProvider(providerConfig.provider) || providerConfig.providerOptions !== undefined)
+      return providerConfig
+    changed = true
+    return { ...providerConfig, providerOptions: { ...CUSTOM_PROVIDER_PRESET_OPTIONS } }
+  })
+  return { config: changed ? { ...config, providersConfig } : config, changed }
+}
+
+interface Migration {
+  version: number
+  migrate: (config: Config) => { config: Config, changed: boolean }
+}
+
+/**
+ * Config changes for configs that an older version saved. A migration runs
+ * once, when the saved schema version is lower than its version.
+ */
+const MIGRATIONS = [
+  { version: 2, migrate: saveCustomProviderPresetOptions },
+] as const satisfies readonly Migration[]
+
+type LastMigration = typeof MIGRATIONS extends readonly [...Migration[], infer Last extends Migration] ? Last : never
+// The version that initializeConfig saves. It must be the version of the last
+// migration, or that migration runs again at each start. Type checking fails
+// when CONFIG_SCHEMA_VERSION is a different version.
+const CURRENT_SCHEMA_VERSION: LastMigration["version"] = CONFIG_SCHEMA_VERSION
 
 /**
  * Initialize the config, this function should only be called once in the background script
@@ -39,6 +75,16 @@ export async function initializeConfig() {
     didConfigChange = true
   }
 
+  // Migrations change only a config that an older version saved.
+  const savedSchemaVersion = storedConfig ? (configMeta?.schemaVersion ?? 1) : CURRENT_SCHEMA_VERSION
+  for (const { version, migrate } of MIGRATIONS) {
+    if (savedSchemaVersion < version) {
+      const result = migrate(config)
+      config = result.config
+      didConfigChange = didConfigChange || result.changed
+    }
+  }
+
   if (import.meta.env.DEV) {
     const apiKeyResult = applyAPIKeysFromEnv(config)
     config = apiKeyResult.config
@@ -46,7 +92,7 @@ export async function initializeConfig() {
   }
 
   const didMetaNeedUpdate
-    = configMeta?.schemaVersion !== CONFIG_SCHEMA_VERSION
+    = configMeta?.schemaVersion !== CURRENT_SCHEMA_VERSION
       || configMeta?.lastModifiedAt === undefined
 
   if (didConfigChange) {
@@ -55,7 +101,7 @@ export async function initializeConfig() {
 
   if (didConfigChange || didMetaNeedUpdate) {
     await storage.setMeta<ConfigMeta>(`local:${CONFIG_STORAGE_KEY}`, {
-      schemaVersion: CONFIG_SCHEMA_VERSION,
+      schemaVersion: CURRENT_SCHEMA_VERSION,
       lastModifiedAt: configMeta?.lastModifiedAt ?? Date.now(),
     })
   }

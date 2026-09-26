@@ -3,6 +3,7 @@ import type { LLMProviderConfig, ProviderConfig } from "@/types/config/provider"
 import type { BatchQueueConfig, RequestQueueConfig } from "@/types/config/translate"
 import type { WebPagePromptContext } from "@/types/content"
 import type { PromptResolver } from "@/utils/host/translate/api/ai"
+import type { ThinkingFallback } from "@/utils/providers/thinking-fallback"
 import { isLLMProviderConfig } from "@/types/config/provider"
 import { DEFAULT_CONFIG } from "@/utils/constants/config"
 import { BATCH_SEPARATOR, BATCH_SEPARATOR_LINE_PATTERN } from "@/utils/constants/prompt"
@@ -13,8 +14,9 @@ import { Sha256Hex } from "@/utils/hash"
 import { executeTranslate } from "@/utils/host/translate/execute-translate"
 import { normalizePromptContextValue } from "@/utils/host/translate/translate-text"
 import { logger } from "@/utils/logger"
-import { onMessage } from "@/utils/message"
+import { onMessage, sendMessage } from "@/utils/message"
 import { getTranslatePrompt } from "@/utils/prompts/translate"
+import { saveThinkingFallback } from "@/utils/providers/thinking-fallback"
 import { BatchQueue } from "@/utils/request/batch-queue"
 import { RequestQueue } from "@/utils/request/request-queue"
 import { ensureInitializedConfig } from "./config"
@@ -27,6 +29,26 @@ export function shouldUseBatchQueue(providerConfig: ProviderConfig): boolean {
   return isLLMProviderConfig(providerConfig)
 }
 
+/**
+ * Saves the provider options that worked, and tells the tabs that asked for
+ * the translation why they changed. Only the first request that saves them
+ * tells the tabs. A failed save does not fail the translation, which already
+ * has a result.
+ */
+async function applyThinkingFallback(providerConfig: ProviderConfig, fallback: ThinkingFallback, tabIds: (number | undefined)[]) {
+  const saved = await saveThinkingFallback(providerConfig.id, providerConfig.providerOptions, fallback)
+    .catch((error) => {
+      logger.warn("Failed to save the thinking fallback options", error)
+      return false
+    })
+  if (!saved)
+    return
+  for (const tabId of new Set(tabIds)) {
+    if (tabId !== undefined)
+      void sendMessage("notifyThinkingFallback", { reason: fallback.reason }, tabId).catch(error => logger.warn("Failed to tell the tab about the thinking fallback", error))
+  }
+}
+
 export async function executeBatchTranslation<TContext>(
   dataList: TranslateBatchData<TContext>[],
   promptResolver: PromptResolver<TContext>,
@@ -35,7 +57,11 @@ export async function executeBatchTranslation<TContext>(
   const texts = dataList.map(d => d.text)
 
   const batchText = texts.join(`\n\n${BATCH_SEPARATOR}\n\n`)
-  const result = await executeTranslate(batchText, langConfig, providerConfig, promptResolver, { isBatch: true, context })
+  const result = await executeTranslate(batchText, langConfig, providerConfig, promptResolver, {
+    isBatch: true,
+    context,
+    onThinkingFallback: fallback => applyThinkingFallback(providerConfig, fallback, dataList.map(data => data.tabId)),
+  })
   return parseBatchResult(result)
 }
 
@@ -97,6 +123,8 @@ export interface TranslateBatchData<TContext = unknown> {
   hash: string
   scheduleAt: number
   context?: TContext
+  /** The tab that asked for the translation. */
+  tabId?: number
 }
 
 interface TranslationQueueSetupConfig<TContext = unknown> {
@@ -142,9 +170,12 @@ async function createTranslationQueues<TContext>(config: TranslationQueueSetupCo
       return requestQueue.enqueue(batchThunk, earliestScheduleAt, hash)
     },
     executeIndividual: async (data) => {
-      const { text, langConfig, providerConfig, hash, scheduleAt, context } = data
+      const { text, langConfig, providerConfig, hash, scheduleAt, context, tabId } = data
       const thunk = async () => {
-        return executeTranslate(text, langConfig, providerConfig, promptResolver, { context })
+        return executeTranslate(text, langConfig, providerConfig, promptResolver, {
+          context,
+          onThinkingFallback: fallback => applyThinkingFallback(providerConfig, fallback, [tabId]),
+        })
       }
       return requestQueue.enqueue(thunk, scheduleAt, hash)
     },
@@ -190,8 +221,9 @@ export async function setUpWebPageTranslationQueue() {
       webSummary: normalizePromptContextValue(webSummary),
     }
 
+    const tabId = message.sender?.tab?.id
     if (shouldUseBatchQueue(providerConfig)) {
-      const data = { text, langConfig, providerConfig, hash, scheduleAt, context }
+      const data = { text, langConfig, providerConfig, hash, scheduleAt, context, tabId }
       result = await batchQueue.enqueue(data)
     }
     else {

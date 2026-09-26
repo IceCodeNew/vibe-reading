@@ -38,6 +38,9 @@ function normalizeUserProviderOptions(
   return changed ? normalizedOptions : userOptions
 }
 
+/** The DeepSeek provider options that turn off thinking. */
+export const DEEPSEEK_THINKING_OFF_OPTIONS = { thinking: { type: "disabled" } } satisfies DeepSeekLanguageModelOptions as Record<string, JSONValue>
+
 /**
  * Provider options that turn off thinking. Translation needs fast answers,
  * so every OpenAI and DeepSeek model gets them. Saved provider options replace
@@ -46,7 +49,7 @@ function normalizeUserProviderOptions(
  */
 const RECOMMENDED_PROVIDER_OPTIONS: Partial<Record<LLMProviderTypes, Record<string, JSONValue>>> = {
   openai: { reasoningEffort: "none" } satisfies OpenAIResponsesProviderOptions,
-  deepseek: { thinking: { type: "disabled" } } satisfies DeepSeekLanguageModelOptions as Record<string, JSONValue>,
+  deepseek: DEEPSEEK_THINKING_OFF_OPTIONS,
 }
 
 /**
