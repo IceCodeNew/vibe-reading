@@ -3,7 +3,7 @@ import type { LLMProviderConfig } from "@/types/config/provider"
 import type { TranslatePromptOptions, TranslatePromptResult } from "@/utils/prompts/translate"
 import { generateText } from "ai"
 import { extractAISDKErrorMessage } from "@/utils/error/extract-message"
-import { getModelById } from "@/utils/providers/model"
+import { getModel } from "@/utils/providers/model"
 import { getProviderOptionsWithOverride } from "@/utils/providers/options"
 import { attachRequestErrorMeta, getRequestErrorMeta } from "@/utils/request/retry-policy"
 
@@ -22,8 +22,8 @@ export async function aiTranslate<TContext>(
   promptResolver: PromptResolver<TContext>,
   options?: { isBatch?: boolean, context?: TContext },
 ) {
-  const { id: providerId, provider, providerOptions: userProviderOptions, temperature } = providerConfig
-  const model = await getModelById(providerId)
+  const { provider, providerOptions: userProviderOptions, temperature } = providerConfig
+  const model = getModel(providerConfig)
 
   const providerOptions = getProviderOptionsWithOverride(provider, userProviderOptions)
   const { systemPrompt, prompt } = await promptResolver(targetCode, text, options)

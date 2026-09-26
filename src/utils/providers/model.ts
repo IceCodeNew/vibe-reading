@@ -1,3 +1,4 @@
+import type { LLMProviderConfig } from "@/types/config/provider"
 import { createDeepSeek } from "@ai-sdk/deepseek"
 import { createOpenAI } from "@ai-sdk/openai"
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
@@ -14,19 +15,11 @@ const CREATE_AI_MAPPER = {
   "deepseek": createDeepSeek,
 } as const
 
-async function getLanguageModelById(providerId: string) {
-  // Parse the stored config: storage can still hold fields from an older version.
-  const config = await getLocalConfig()
-  if (!config) {
-    throw new Error("Config not found")
-  }
-
-  const LLMProvidersConfig = getLLMProvidersConfig(config.providersConfig)
-  const providerConfig = getProviderConfigById(LLMProvidersConfig, providerId)
-  if (!providerConfig) {
-    throw new Error(`Provider ${providerId} not found`)
-  }
-
+/**
+ * The language model for this provider config. Callers that have the config
+ * pass it, so that a test of unsaved settings uses those settings.
+ */
+export function getModel(providerConfig: LLMProviderConfig) {
   const headers = getProviderHeadersWithOverride(providerConfig.provider, providerConfig.headers)
   const baseURL = normalizeBaseURL(providerConfig.baseURL)
   const provider = isCustomLLMProvider(providerConfig.provider)
@@ -53,5 +46,16 @@ async function getLanguageModelById(providerId: string) {
 }
 
 export async function getModelById(providerId: string) {
-  return getLanguageModelById(providerId)
+  // Parse the stored config: storage can still hold fields from an older version.
+  const config = await getLocalConfig()
+  if (!config) {
+    throw new Error("Config not found")
+  }
+
+  const providerConfig = getProviderConfigById(getLLMProvidersConfig(config.providersConfig), providerId)
+  if (!providerConfig) {
+    throw new Error(`Provider ${providerId} not found`)
+  }
+
+  return getModel(providerConfig)
 }
