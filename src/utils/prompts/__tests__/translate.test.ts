@@ -3,7 +3,7 @@ import type { Config } from "@/types/config/config"
 import type { PromptLanguageSetting, TranslatePromptObj } from "@/types/config/translate"
 import type { WebPagePromptContext } from "@/types/content"
 import { describe, expect, it } from "vitest"
-import { BATCH_SEPARATOR, BATCH_TRANSLATE_RULES } from "@/utils/constants/prompt"
+import { BATCH_RULE_TEXT, BATCH_SEPARATOR, BATCH_TRANSLATE_RULES, DOMAIN_PROMPT_IDS, renderBuiltinPromptTemplate } from "@/utils/constants/prompt"
 import { getTranslatePromptFromConfig } from "../translate"
 
 const CUSTOM_PROMPT: TranslatePromptObj = {
@@ -14,6 +14,7 @@ const CUSTOM_PROMPT: TranslatePromptObj = {
 }
 
 function translatePrompt({
+  patterns = [CUSTOM_PROMPT],
   promptId = null,
   promptLanguage = "auto",
   targetCode,
@@ -21,6 +22,7 @@ function translatePrompt({
   isBatch = false,
   context,
 }: {
+  patterns?: TranslatePromptObj[]
   promptId?: string | null
   promptLanguage?: PromptLanguageSetting
   targetCode: LangCodeISO6393
@@ -29,7 +31,7 @@ function translatePrompt({
   context?: WebPagePromptContext
 }) {
   const translateConfig: Pick<Config["translate"], "customPromptsConfig" | "promptLanguage"> = {
-    customPromptsConfig: { promptId, patterns: [CUSTOM_PROMPT] },
+    customPromptsConfig: { promptId, patterns },
     promptLanguage,
   }
   return getTranslatePromptFromConfig(translateConfig, targetCode, input, { isBatch, context })
@@ -140,19 +142,140 @@ describe("domain translation prompt", () => {
 })
 
 describe("custom translation prompt", () => {
-  it("user keeps their own prompt: Given Chinese prompts are pinned, When they translate into Chinese, Then their prompt uses the English language name as before", () => {
-    const result = translatePrompt({ promptId: CUSTOM_PROMPT.id, promptLanguage: "zh", targetCode: "cmn", context: { webTitle: "Docs" } })
+  it.each([
+    ["zh", "spa", "西班牙语"],
+    ["en", "cmn", "Simplified Mandarin Chinese"],
+    ["auto", "cmn", "简体中文"],
+    ["auto", "spa", "Spanish"],
+  ] as const)("user uses their own prompt: Given the prompt language %s, When they translate into %s, Then {{targetLanguage}} is %s like in the built-in prompts", (promptLanguage, targetCode, name) => {
+    const result = translatePrompt({ promptId: CUSTOM_PROMPT.id, promptLanguage, targetCode, context: { webTitle: "Docs" } })
 
     expect(result).toEqual({
-      systemPrompt: "You translate into Simplified Mandarin Chinese.",
+      systemPrompt: `You translate into ${name}.`,
       prompt: "Title: Docs\nHello world",
     })
   })
 
-  it("user keeps their own prompt for several paragraphs: Given a batch request, When the target is Chinese, Then the English batch rules follow their system prompt as before", () => {
+  it("user uses their own prompt for several paragraphs: Given a batch request, When the target is Chinese, Then the English batch rules follow their system prompt", () => {
     const result = translatePrompt({ promptId: CUSTOM_PROMPT.id, targetCode: "cmn", isBatch: true })
 
-    expect(result.systemPrompt).toBe(`You translate into Simplified Mandarin Chinese.\n\n${BATCH_TRANSLATE_RULES}`)
+    expect(result.systemPrompt).toBe(`You translate into 简体中文.\n\n${BATCH_TRANSLATE_RULES}`)
+  })
+
+  describe.each([
+    { promptLanguage: "zh", targetCode: "fra", domainId: "builtin:legal", withSummary: false },
+    { promptLanguage: "zh", targetCode: "cmn", domainId: undefined, withSummary: true },
+    { promptLanguage: "en", targetCode: "fra", domainId: "builtin:technology", withSummary: true },
+    { promptLanguage: "en", targetCode: "spa", domainId: undefined, withSummary: false },
+  ] as const)("a copy of the $domainId prompt in $promptLanguage", ({ promptLanguage, targetCode, domainId, withSummary }) => {
+    const copy: TranslatePromptObj = { id: "copy", name: "Copy", systemPrompt: "", prompt: renderBuiltinPromptTemplate({ promptLanguage, domainId, withSummary }) }
+    const context = { webTitle: "Contract", webSummary: withSummary ? "A supply contract." : undefined }
+
+    it.each([false, true])("user customizes a built-in prompt: Given a copy of its template, When a page is translated (batch: %s), Then the model gets the same request as with the built-in prompt", (isBatch) => {
+      const input = isBatch ? `First\n\n${BATCH_SEPARATOR}\n\nSecond` : "First"
+      const builtin = translatePrompt({ promptId: domainId ?? null, promptLanguage, targetCode, input, isBatch, context })
+
+      const custom = translatePrompt({ patterns: [copy], promptId: copy.id, promptLanguage, targetCode, input, isBatch, context })
+
+      expect(custom).toEqual(builtin)
+    })
+  })
+
+  it.each([false, true])("user customizes a prompt while page context is on: Given the summary of the page failed, When a page is translated (batch: %s), Then the copy leaves out the summary line like the built-in prompt", (isBatch) => {
+    const copy: TranslatePromptObj = { id: "copy", name: "Copy", systemPrompt: "", prompt: renderBuiltinPromptTemplate({ promptLanguage: "zh", domainId: "builtin:legal", withSummary: true }) }
+    const context = { webTitle: "Contract" }
+    const builtin = translatePrompt({ promptId: "builtin:legal", targetCode: "cmn", isBatch, context })
+
+    const custom = translatePrompt({ patterns: [copy], promptId: copy.id, targetCode: "cmn", isBatch, context })
+
+    expect(custom).toEqual(builtin)
+  })
+
+  it("user wrote a prompt before optional sections: Given {{webTitle}} outside a section and a page without a title, When a paragraph is translated, Then the prompt gets the text for a missing title like before", () => {
+    const own: TranslatePromptObj = { id: "own", name: "Own", systemPrompt: "Title: {{webTitle}}\nTarget: {{targetLanguage}}", prompt: "{{webTitle}} {{input}}" }
+
+    const result = translatePrompt({ patterns: [own], promptId: own.id, targetCode: "spa", input: "Hello", context: { webTitle: " ", webSummary: "Summary" } })
+
+    expect(result).toEqual({ systemPrompt: "Title: No title available\nTarget: Spanish", prompt: "No title available Hello" })
+  })
+
+  it("user marks a part of the prompt as optional: Given {{#webSummary}}...{{/webSummary}}, When a page without and with a summary is translated, Then the part and its line go away without a summary and stay without the marks with one", () => {
+    const own: TranslatePromptObj = { id: "own", name: "Own", systemPrompt: "", prompt: "Translate into {{targetLanguage}}{{#webSummary}}, using the summary {{webSummary}}{{/webSummary}}.\n{{#webSummary}}Summary: {{webSummary}}{{/webSummary}}\n{{input}}" }
+
+    const without = translatePrompt({ patterns: [own], promptId: own.id, targetCode: "spa", input: "Hello", context: { webTitle: "Docs" } })
+    const withSummary = translatePrompt({ patterns: [own], promptId: own.id, targetCode: "spa", input: "Hello", context: { webTitle: "Docs", webSummary: "A guide." } })
+
+    expect(without.prompt).toBe("Translate into Spanish.\nHello")
+    expect(withSummary.prompt).toBe("Translate into Spanish, using the summary A guide..\nSummary: A guide.\nHello")
+  })
+
+  describe.each(["en", "zh"] as const)("every copy of a %s template", (promptLanguage) => {
+    const labels = promptLanguage === "zh" ? ["【背景信息】", "【待翻译文本】"] : ["[Background Information]", "[Source Text]"]
+    const targetCode = promptLanguage === "zh" ? "cmn" : "spa"
+
+    it.each([undefined, ...DOMAIN_PROMPT_IDS].flatMap(domainId => [false, true].map(withSummary => ({ domainId, withSummary }))))("user customizes the $domainId prompt (summary line: $withSummary): Given a page with and without a title, When a paragraph is translated, Then the copy equals the built-in prompt with a title, and loses the background and the source text label without one", ({ domainId, withSummary }) => {
+      const copy: TranslatePromptObj = { id: "copy", name: "Copy", systemPrompt: "", prompt: renderBuiltinPromptTemplate({ promptLanguage, domainId, withSummary }) }
+      const context = { webTitle: "Contract", webSummary: withSummary ? "A supply contract." : undefined }
+      const custom = (pageContext: WebPagePromptContext) => translatePrompt({ patterns: [copy], promptId: copy.id, promptLanguage, targetCode, input: "First", context: pageContext })
+
+      expect(custom(context)).toEqual(translatePrompt({ promptId: domainId ?? null, promptLanguage, targetCode, input: "First", context }))
+      const withoutTitle = custom({ webSummary: "A supply contract." }).prompt
+      expect(withoutTitle).not.toContain(labels[0])
+      expect(withoutTitle).not.toContain(labels[1])
+      expect(withoutTitle.endsWith("\n\nFirst")).toBe(true)
+    })
+  })
+
+  it("user copied a Chinese template: Given a copy with the Chinese prompt language and the Auto setting, When the target language becomes Spanish, Then the copy still gets the Chinese language name and the Chinese batch rule", () => {
+    const copy: TranslatePromptObj = { id: "copy", name: "Copy", systemPrompt: "", promptLanguage: "zh", prompt: "将以下文本翻译为{{targetLanguage}}。\n{{batchRule}}\n\n{{input}}" }
+
+    const result = translatePrompt({ patterns: [copy], promptId: copy.id, targetCode: "spa", input: "A", isBatch: true })
+
+    expect(result.prompt).toBe(`将以下文本翻译为西班牙语。\n${BATCH_RULE_TEXT.zh}\n\nA`)
+  })
+
+  it("user translates text about template tokens: Given a paragraph with {{webTitle}} and {{webContent}} in it, When it is translated with a custom prompt, Then the paragraph reaches the model unchanged", () => {
+    const own: TranslatePromptObj = { id: "own", name: "Own", systemPrompt: "", prompt: "Page: {{webTitle}}\n{{input}}" }
+    const input = "Use {{webTitle}} or {{webContent}} in your template."
+
+    const result = translatePrompt({ patterns: [own], promptId: own.id, targetCode: "spa", input, context: { webTitle: "Docs", webContent: "Body" } })
+
+    expect(result.prompt).toBe(`Page: Docs\n${input}`)
+  })
+
+  it("user puts an optional section on its own line between blank lines: Given a page without a summary, When a paragraph is translated, Then the section goes away with one of the blank lines", () => {
+    const own: TranslatePromptObj = { id: "own", name: "Own", systemPrompt: "", prompt: "Translate into {{targetLanguage}}.\n\n{{#webSummary}}Summary: {{webSummary}}{{/webSummary}}\n\n{{input}}" }
+
+    const result = translatePrompt({ patterns: [own], promptId: own.id, targetCode: "spa", input: "Hello", context: { webTitle: "Docs" } })
+
+    expect(result.prompt).toBe("Translate into Spanish.\n\nHello")
+  })
+
+  it("user translates a page whose title has a template token: Given the title \"Passing {{input}} to helpers\", When a paragraph is translated with a custom prompt, Then the title reaches the model unchanged", () => {
+    const own: TranslatePromptObj = { id: "own", name: "Own", systemPrompt: "", prompt: "Page: {{webTitle}}\n{{input}}" }
+
+    const result = translatePrompt({ patterns: [own], promptId: own.id, targetCode: "spa", input: "Hello", context: { webTitle: "Passing {{input}} to helpers" } })
+
+    expect(result.prompt).toBe("Page: Passing {{input}} to helpers\nHello")
+  })
+
+  it("user translates text with dollar signs: Given $' and $$ in the paragraph, When it is translated with a custom prompt, Then the paragraph reaches the model unchanged", () => {
+    const own: TranslatePromptObj = { id: "own", name: "Own", systemPrompt: "", prompt: "Translate:\n{{input}}\nEnd" }
+    const input = "Use $' in sed. It costs US$$5."
+
+    const result = translatePrompt({ patterns: [own], promptId: own.id, targetCode: "spa", input })
+
+    expect(result.prompt).toBe(`Translate:\n${input}\nEnd`)
+  })
+
+  it("user writes a prompt with {{batchRule}}: Given the token in their own prompt, When a batch is translated, Then the rule replaces the token and the system prompt gets no English rules", () => {
+    const own: TranslatePromptObj = { id: "own", name: "Own", systemPrompt: "Be brief.", prompt: "Translate into {{targetLanguage}}.\n{{batchRule}}\n\n{{input}}" }
+
+    const batch = translatePrompt({ patterns: [own], promptId: own.id, targetCode: "spa", input: "A", isBatch: true })
+    const single = translatePrompt({ patterns: [own], promptId: own.id, targetCode: "spa", input: "A" })
+
+    expect(batch).toEqual({ systemPrompt: "Be brief.", prompt: `Translate into Spanish.\n${BATCH_RULE_TEXT.en}\n\nA` })
+    expect(single).toEqual({ systemPrompt: "Be brief.", prompt: "Translate into Spanish.\n\nA" })
   })
 
   it("user deleted the selected prompt: Given the prompt id is not in the list, When they translate, Then the default prompt is used", () => {

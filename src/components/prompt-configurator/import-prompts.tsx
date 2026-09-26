@@ -13,12 +13,7 @@ export function ImportPrompts() {
   const inputId = useId()
 
   const injectPrompts = (list: PromptConfigList) => {
-    const patterns = list.map(item => ({
-      ...item,
-      id: getRandomUUID(),
-      // Backwards compatibility: add systemPrompt if missing from imported file
-      systemPrompt: item.systemPrompt ?? "",
-    }))
+    const patterns = list.map(item => ({ ...item, id: getRandomUUID() }))
 
     setConfig({
       ...config,

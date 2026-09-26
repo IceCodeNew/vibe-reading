@@ -11,6 +11,20 @@ const CHINESE_LANGUAGE_TAGS: Partial<Record<LangCodeISO6393, string>> = {
 
 const chineseLanguageNames = new Intl.DisplayNames(["zh-Hans"], { type: "language" })
 
+const HAN_TEXT = /\p{Script=Han}/u
+// Japanese and Korean text can also have Han characters.
+const KANA_OR_HANGUL_TEXT = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u
+
+/**
+ * The prompt language that a prompt text shows: Chinese when the text has
+ * Han characters and no kana or Hangul, otherwise English. Earlier versions
+ * named the target language in English for all custom prompts, so a prompt
+ * in another language keeps English names.
+ */
+export function inferPromptLanguage(text: string): PromptLanguage {
+  return HAN_TEXT.test(text) && !KANA_OR_HANGUL_TEXT.test(text) ? "zh" : "en"
+}
+
 /**
  * The language of the built-in prompts. "auto" selects Chinese prompts
  * when the translation target is a Chinese language.

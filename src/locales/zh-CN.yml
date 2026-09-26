@@ -156,7 +156,7 @@ options:
       description: 先让模型读一遍页面摘要，再翻译各段。开始时会慢几秒，多用一些 token。
     promptLanguage:
       title: 提示词语言
-      description: 默认提示词和领域提示词使用的语言。选“自动”时，目标语言是中文就用中文提示词。自定义提示词不受影响。
+      description: 默认提示词和领域提示词使用的语言。自定义提示词里的目标语言名称和分隔符规则也按它来，除非该提示词单独设置了语言。选“自动”时，目标语言是中文就用中文提示词。
       auto: 自动
       en: 英文
       zh: 中文
@@ -184,13 +184,18 @@ options:
         prompt: 提示词
         save: 保存
         cancel: 取消
+        customize: 自定义
+        customName: $1（自定义）
+        promptLanguage: 提示词语言
+        followPromptLanguage: 跟随设置
       tokens:
         input: 需要翻译的文本
         targetLanguage: 目标语言
-        webTitle: 网页标题
-        webDescription: 页面元信息中的描述
-        webContent: 网页正文（前 2000 个字符）
-        webSummary: 网页摘要（需开启全文上下文）
+        webTitle: 网页标题。写在 {{#webTitle}} 和 {{/webTitle}} 之间的内容，在网页没有标题时会被删除。
+        webDescription: 页面元信息中的描述。写在 {{#webDescription}} 和 {{/webDescription}} 之间的内容，在页面没有描述时会被删除。
+        webContent: 网页正文（前 2000 个字符）。写在 {{#webContent}} 和 {{/webContent}} 之间的内容，在网页没有正文时会被删除。
+        webSummary: 网页摘要（需开启全文上下文）。写在 {{#webSummary}} 和 {{/webSummary}} 之间的内容，在没有摘要时会被删除。
+        batchRule: 分隔符规则（只在多段请求中出现）
       deleteDialog:
         title: 删除“$1”？
         description: 此操作无法撤销。

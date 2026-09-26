@@ -43,18 +43,21 @@ export const translationNodeStyleConfigSchema = z.object({
 
 export type TranslationNodeStyleConfig = z.infer<typeof translationNodeStyleConfigSchema>
 
+export const PROMPT_LANGUAGE_SETTINGS = ["auto", "en", "zh"] as const
+export const promptLanguageSettingSchema = z.enum(PROMPT_LANGUAGE_SETTINGS)
+export type PromptLanguageSetting = z.infer<typeof promptLanguageSettingSchema>
+export type PromptLanguage = Exclude<PromptLanguageSetting, "auto">
+export const PROMPT_LANGUAGES = ["en", "zh"] as const satisfies readonly PromptLanguage[]
+
 export const translatePromptObjSchema = z.object({
   name: z.string(),
   id: z.string(),
   systemPrompt: z.string(),
   prompt: z.string(),
+  /** The language of the prompt text. Without it, the prompt language setting applies. */
+  promptLanguage: z.enum(PROMPT_LANGUAGES).optional(),
 })
 export type TranslatePromptObj = z.infer<typeof translatePromptObjSchema>
-
-export const PROMPT_LANGUAGE_SETTINGS = ["auto", "en", "zh"] as const
-export const promptLanguageSettingSchema = z.enum(PROMPT_LANGUAGE_SETTINGS)
-export type PromptLanguageSetting = z.infer<typeof promptLanguageSettingSchema>
-export type PromptLanguage = Exclude<PromptLanguageSetting, "auto">
 
 export const customPromptsConfigSchema = z.object({
   promptId: z.string().nullable(),

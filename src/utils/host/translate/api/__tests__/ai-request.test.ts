@@ -85,7 +85,7 @@ describe.each(["deepseek", "openai-compatible"] as const)("translation request t
     await executeTranslate("Hello", DEFAULT_CONFIG.language, providerFor(provider), getTranslatePrompt)
 
     expect(requests[0].messages).toEqual([
-      { role: "system", content: "Translate into Simplified Mandarin Chinese." },
+      { role: "system", content: "Translate into 简体中文." },
       { role: "user", content: "Hello" },
     ])
   })

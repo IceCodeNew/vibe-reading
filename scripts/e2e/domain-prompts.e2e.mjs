@@ -98,6 +98,10 @@ before(async () => {
 
 beforeEach(async () => {
   requests.length = 0
+  // The extension keeps page translation on per tab, so each test starts in a new tab.
+  await article.close()
+  article = await context.newPage()
+  await article.goto(pageURL)
   await options.bringToFront()
   await options.goto(optionsURL)
   await waitForText(options, "Prompt language")
@@ -156,4 +160,63 @@ it("user translates a contract with the legal prompt in Chinese: Given the quali
   const prompt = request.messages[0].content
   assert.ok(prompt.startsWith(`【背景信息】\n标题: ${title}\n\n请结合背景信息将以下文本翻译为法语，注意只需要输出翻译后的结果，不要额外解释。\n注意翻译的风格要严格符合【正式的法律文书语体`), prompt)
   assert.ok(prompt.endsWith(`【待翻译文本】\n${text}`), prompt)
+})
+
+it("user customizes the legal prompt: Given the read-only legal prompt, When the user customizes it, edits the copy and translates a page with it, Then the model gets the edited copy and the built-in prompt stays unchanged", async () => {
+  // Given
+  const builtin = await viewPrompt("Legal")
+  const builtinText = await builtin.inputValue()
+  const dialog = options.getByRole("dialog")
+
+  // When
+  await dialog.getByRole("button", { name: "Customize", exact: true }).click()
+  const name = options.locator("#prompt-name")
+  assert.equal(await name.inputValue(), "Legal (custom)")
+  assert.equal(await dialog.getByText("New prompt", { exact: true }).count(), 1)
+  const prompt = dialog.locator("textarea.max-h-60")
+  assert.equal(await prompt.isDisabled(), false)
+  assert.equal(await prompt.inputValue(), builtinText)
+  // The copy keeps the language of the template, and the user can change it.
+  const language = dialog.getByRole("group", { name: "Prompt language" })
+  assert.equal(await language.getByRole("button", { name: "English", exact: true }).getAttribute("aria-pressed"), "true")
+  assert.equal(await language.getByRole("button", { name: "English", exact: true }).isDisabled(), false)
+  await name.fill("Contracts")
+  await prompt.fill(builtinText.replace("formal legal language", "formal contract language"))
+  await capture(options, "domain-customize")
+  await dialog.getByRole("button", { name: "Save", exact: true }).click()
+  await dialog.waitFor({ state: "detached" })
+  await promptRow("Contracts").getByRole("radio").check()
+  const saved = await options.evaluate(() => new Promise((resolve) => {
+    const check = async () => {
+      const { config } = await chrome.storage.local.get("config")
+      const copy = config.translate.customPromptsConfig.patterns.find(pattern => pattern.name === "Contracts")
+      if (copy) {
+        chrome.storage.onChanged.removeListener(check)
+        resolve(copy)
+      }
+    }
+    chrome.storage.onChanged.addListener(check)
+    check()
+  }))
+  assert.equal(saved.promptLanguage, "en")
+
+  // Then the built-in prompt is still read-only and unchanged
+  const after = await viewPrompt("Legal")
+  assert.equal(await after.isDisabled(), true)
+  assert.equal(await after.inputValue(), builtinText)
+  assert.equal(await options.getByRole("dialog").getByRole("button", { name: "Save", exact: true }).count(), 0)
+  await closeDialog()
+
+  // When the user translates a page with the copy
+  await article.bringToFront()
+  await article.goto(pageURL)
+  await waitForText(article, text)
+  await article.keyboard.press("Alt+e")
+  await article.locator("#clause .plainly-translated-content-wrapper", { hasText: translated }).waitFor()
+
+  // Then
+  const request = translationRequests().find(body => JSON.stringify(body.messages).includes(text))
+  // Like the built-in prompt: one user message, no summary line (page context is off), and the batch rule once.
+  assert.deepEqual(request.messages.map(message => message.role), ["user"])
+  assert.equal(request.messages[0].content, `[Background Information]\nTitle: ${title}\n\nPlease translate the following text into French, taking the provided background information into consideration. Note that you should only output the translated result without any additional explanation.\nNote that the translation style must strictly conform to [formal contract language, with accurate legal terms, and clause numbers and defined terms kept as in the source].\nYou must retain the exact same number of delimiters in the translation. Strictly do not omit, escape, or translate these symbols, and pay close attention to their placement.\n\n[Source Text]\n${text}`)
 })
